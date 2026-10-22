@@ -1,0 +1,27 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pollinator-mock",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "C:/Users/dgoddard/Documents/GitHub/legopollinator/tools/mock_board.py"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "pollinator-site",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8770",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/dgoddard/Documents/GitHub/legopollinator/newsite/roboarm_mini"
+      ],
+      "port": 8770
+    }
+  ]
+}
