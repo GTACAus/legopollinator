@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Robot Pollinator 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700;800&display=swap">
+<style>
+/* The robot pollinator from mega.pollinator.ldr (pollinator/gen_pollinator.py). This live 3D version is the
+   source of the light pre-rendered frames that pollinator.html shows (render_frames.py pollinator):
+   a turntable (?for=spin) and the "what does the remote control" steps (?for=ports). */
+:root {
+  --eggshell: #F9F6E7; --onyx: #272A24; --cobalt: #4C34E5; --flame: #FF6D3A; --yellow: #FFCD1F;
+  --muted: #5C6057; --line: #DDD8C2; --card: #FFFFFF;
+  --font: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box }
+html, body { height: 100%; margin: 0 }
+body { background: var(--eggshell); color: var(--onyx); font: 15px/1.45 var(--font); display: flex; flex-direction: column }
+#asm { position: relative; flex: 1; min-height: 260px; overflow: hidden; touch-action: none; cursor: grab }
+#asm canvas { display: block; width: 100%; height: 100% }
+.status { position: absolute; inset: auto 0 0 0; padding: 10px 14px; font-weight: 600; font-size: 13px; color: var(--muted) }
+.tag { position: absolute; left: 0; top: 0; pointer-events: none; font: 800 14px/1 var(--font); padding: 7px 9px; border-radius: 8px;
+  background: var(--yellow); border: 2px solid var(--onyx); color: var(--onyx); white-space: nowrap }
+.bar { display: flex; gap: 6px; padding: 10px 14px; border-top: 2px solid var(--line); background: var(--card); flex-wrap: wrap }
+.bar button { font: 800 15px/1 var(--font); min-height: 40px; padding: 0 14px; border-radius: 999px; border: 2px solid var(--onyx); background: #fff }
+.bar button.sel { background: var(--cobalt); border-color: var(--cobalt); color: #fff }
+</style>
+</head>
+<body>
+<div id="asm"><div class="status" id="status">Loading the 3D model (about 35 MB)…</div></div>
+<div class="bar" id="bar"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+<script>
+// Model frame (gen_pollinator.py): millimetres, y up, the arm towards +z, the robot's left is +x.
+// The hub (LDraw 45601, in place of Studio's bb1142c01) lies across the robot (x -44..44, z -90.9..-34.9, y 72..104).
+// Its ports are on its long sides, as in hub-buttons-3d.html: A, C, E face the front, towards the arm (z -34.9),
+// B, D, F the back (z -90.9), at x -16, 0, 16 (A/B, C/D, E/F).
+const PORT_Y = 99;
+const PORT = { A: [-16, PORT_Y, -34.9], C: [0, PORT_Y, -34.9], E: [16, PORT_Y, -34.9], D: [0, PORT_Y, -90.9] };
+// The GTAC board stands on the robot's back (the D port side), its lid and gtac logo facing backwards so the logo
+// reads from behind; its cable runs up over the hub to port A. BOARD_AT: the middle of its lid, in mm.
+const BOARD_AT = [0, 62, -150];
+const RENDER = new URLSearchParams(location.search).has('render');
+const HL = { drive: 0x4C34E5, arm: 0xFF6D3A, port: 0xFF6D3A };
+// Steps of the "what does the remote control" player (pollinator.html?for=ports). Tags are in this order:
+const TAGS = [
+  { html: 'A', at: [-16, PORT_Y + 4, -14] }, { html: 'C', at: [0, PORT_Y + 4, -14] }, { html: 'E', at: [16, PORT_Y + 4, -14] },
+  { html: 'D', at: [0, PORT_Y + 14, -108] },
+  { html: 'C · right wheel', at: [-92, 52, -70] }, { html: 'D · left wheel', at: [92, 52, -70] },
+  { html: 'E · pollination arm', at: [0, 40, 95] },
+  { html: 'GTAC board → A', at: null },          // set once the board is placed: beside its cable socket
+];
+const STEPS = [
+  { tags: [0, 1, 2, 3], glow: ['A', 'C', 'D', 'E'], view: 'front' },
+  { tags: [4, 5], groups: { motorC: HL.drive, motorD: HL.drive }, glow: ['C', 'D'], view: 'back' },
+  { tags: [6], groups: { motorE: HL.arm, rack: HL.arm }, glow: ['E'], view: 'side' },
+  { tags: [7], glow: ['A'], view: 'board' },
+];
+const VIEWS = {
+  back: { t: [0, 62, -30], p: [140, 250, -340] },
+  front: { t: [0, 72, -40], p: [-150, 300, 300] },
+  board: { t: [0, 70, -100], p: [-230, 260, -420] },
+  side: { t: [0, 48, 20], p: [320, 180, 250] },
+  spin: { t: [0, 52, 0], p: [0, 175, 410] },
+};
+
+async function boot() {
+  const host = document.getElementById('asm'), status = document.getElementById('status');
+  if (!window.THREE || !THREE.OrbitControls || !THREE.GLTFLoader) { status.textContent = 'three.js could not load (needs the internet).'; return; }
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: RENDER });
+  renderer.setPixelRatio(RENDER ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+  host.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(30, 1, 5, 5000);
+  const controls = new THREE.OrbitControls(cam, renderer.domElement);
+  controls.enableDamping = true;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a918d, 0.8));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.65); sun.position.set(200, 500, 300); scene.add(sun);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.3); fill.position.set(-300, 200, -250); scene.add(fill);
+  const lam = (c, extra) => new THREE.MeshLambertMaterial(Object.assign({ color: c, side: THREE.DoubleSide }, extra || {}));
+  renderer.setClearColor(0xF9F6E7, 1);       // the pages' eggshell, so the frames blend in
+
+  // The model: one material per <group>_<colour>; remember each group's materials to tint them
+  const groups = {};
+  const robot = new THREE.Group(); scene.add(robot);
+  try {
+    const buf = await (await fetch('pollinator/build/pollinator.glb')).arrayBuffer();
+    const gltf = await new Promise((ok, fail) => new THREE.GLTFLoader().parse(buf, '', ok, fail));
+    gltf.scene.traverse(o => {
+      if (!o.isMesh) return;
+      const name = o.material.name || 'body_0', g = name.split('_')[0];
+      const base = o.material.color.clone().convertLinearToSRGB();
+      o.material = lam(base); o.material.userData.base = base;
+      (groups[g] = groups[g] || []).push(o.material);
+    });
+    gltf.scene.scale.setScalar(1000); robot.add(gltf.scene); status.remove();
+  } catch (e) { status.textContent = 'Couldn\'t load pollinator/build/pollinator.glb: run pollinator/gen_pollinator.py first.'; return; }
+
+  // The GTAC board: the printed case (all blue, as printed) with the LMS-ESP32 inside, as on the robot arm pages.
+  // Board frame (case.py): X across, Y up through the lid, Z along. Seen from the lid side with X up, the gtac
+  // logo reads left to right along +Z (as in gtac-board.png). On the robot's back: lid -> backwards (-z),
+  // X -> up (+y), Z -> the robot's right (-x), which is the right of someone standing behind it.
+  const board = new THREE.Group(), inner = new THREE.Group(); board.add(inner); scene.add(board);
+  const stl = f => fetch(f).then(r => r.arrayBuffer()).then(b => { const g = new THREE.STLLoader().parse(b); g.computeVertexNormals(); return g; });
+  const [base, lid, pcb] = await Promise.all([stl('out/case-base.stl'), stl('out/case-lid.stl'),
+    fetch('out/lms-esp32.glb').then(r => r.arrayBuffer()).then(b => new Promise((ok, fail) => new THREE.GLTFLoader().parse(b, '', ok, fail)))]);
+  inner.add(new THREE.Mesh(base, lam(0x2448c8)), new THREE.Mesh(lid, lam(0x2f55d8)));
+  pcb.scene.traverse(o => { if (o.isMesh) o.material = lam(o.material.color.clone().convertLinearToSRGB()); });
+  pcb.scene.scale.setScalar(1000); inner.add(pcb.scene);
+  const lidMid = new THREE.Vector3(21.4, 16.5, 26.5);                         // the middle of the lid's top (case STL bounds)
+  inner.position.copy(lidMid).negate();
+  board.matrix.set(0, 0, -1, 0,   1, 0, 0, 0,   0, -1, 0, 0,   0, 0, 0, 1);    // rows; columns: X -> +y, Y -> -z, Z -> -x
+  board.matrix.setPosition(...BOARD_AT); board.matrixAutoUpdate = false; board.updateMatrixWorld(true);
+  const hdr = new THREE.Vector3(4.97, 3.6 + 14, 40.24).applyMatrix4(inner.matrixWorld);   // its HUB socket (arm-cables-3d.html)
+  TAGS[7].at = [BOARD_AT[0] + 10, BOARD_AT[1] - 42, BOARD_AT[2] - 6];
+  // Its cable: out of the socket backwards, up the back, over the hub and down to an LPF2 plug in port A (which faces +z)
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const out = V(0, 0, 1), pA = V(...PORT.A), endA = pA.clone().addScaledVector(out, 13.7);
+  const black = lam(0x1d1f22);
+  // (sideways to the board's right edge first, so it never crosses the logo)
+  const edge = BOARD_AT[0] - 38;
+  const cable = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([hdr, hdr.clone().add(V(0, 0, -8)),
+    V(edge, hdr.y, hdr.z - 6), V(edge, BOARD_AT[1] + 40, BOARD_AT[2] + 4), V(-24, 120, -100), V(-16, 122, -62),
+    endA.clone().addScaledVector(out, 14).add(V(0, 14, 0)), endA],
+    false, 'centripetal'), 120, 1.6, 10), black);
+  const plug = new THREE.Mesh(new THREE.BoxGeometry(13.9, 7.5, 13.7), black); plug.position.copy(pA).addScaledVector(out, 13.7 / 2);
+  scene.add(cable, plug);
+
+  // Port glows on the hub's sides
+  const glow = {};
+  Object.entries(PORT).forEach(([l, [x, y, z]]) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(13, 7, 2.5), new THREE.MeshBasicMaterial({ color: HL.port, transparent: true, opacity: 0, depthWrite: false }));
+    m.position.set(x, y, z + (z < -60 ? -0.8 : 0.8)); m.renderOrder = 3; scene.add(m); glow[l] = m;
+  });
+  const tagEls = TAGS.map(t => { const el = document.createElement('div'); el.className = 'tag'; el.innerHTML = t.html; el.style.display = 'none'; host.appendChild(el); return el; });
+
+  let step = -1;
+  function paint(s) {
+    step = s;
+    const st = s >= 0 ? STEPS[s] : { tags: [], glow: [] };
+    Object.entries(groups).forEach(([g, mats]) => mats.forEach(m => {
+      const c = st.groups && st.groups[g];
+      m.color.copy(m.userData.base); m.emissive.setHex(0);
+      if (c) { m.color.lerp(new THREE.Color(c), 0.65); m.emissive.setHex(c).multiplyScalar(0.35); }
+    }));
+    Object.entries(glow).forEach(([l, m]) => { m.material.opacity = st.glow.includes(l) ? 0.9 : 0; });
+  }
+  const aim = (q, a) => {
+    const t = new THREE.Vector3(...q.t), p = new THREE.Vector3(...q.p).sub(t).applyAxisAngle(new THREE.Vector3(0, 1, 0), a).add(t);
+    cam.position.copy(p); cam.lookAt(t); controls.target.copy(t); cam.updateMatrixWorld();   // tags are projected before the frame is drawn
+  };
+  const v = new THREE.Vector3();
+  const proj = p => { v.set(...p).project(cam); return v.z < 1 ? [Math.round((v.x + 1) / 2 * 1e4) / 1e4, Math.round((1 - v.y) / 2 * 1e4) / 1e4] : 0; };
+
+  if (RENDER) return renderAll();
+
+  // Interactive (to check the model and tags): pick a step, drag to turn
+  const bar = document.getElementById('bar');
+  [['Turntable', -1, 'spin'], ...STEPS.map((s, i) => ['Step ' + (i + 1), i, s.view])].forEach(([label, s, view]) => {
+    const b = document.createElement('button'); b.textContent = label;
+    b.onclick = () => { [...bar.children].forEach(x => x.classList.toggle('sel', x === b)); paint(s); aim(VIEWS[view], 0); };
+    bar.appendChild(b);
+  });
+  bar.children[0].click();
+  function resize() { const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); }
+  new ResizeObserver(resize).observe(host); resize();
+  (function loop() {
+    controls.update(); renderer.render(scene, cam);
+    const W = renderer.domElement.clientWidth, H = renderer.domElement.clientHeight, on = step >= 0 ? STEPS[step].tags : [];
+    TAGS.forEach((t, i) => {
+      const p = proj(t.at), el = tagEls[i];
+      el.style.display = on.includes(i) && p ? '' : 'none';
+      if (p) el.style.transform = `translate(${p[0] * W}px, ${p[1] * H}px) translate(-50%, -50%)`;
+    });
+    requestAnimationFrame(loop);
+  })();
+
+  // ?render: every frame posted to render_frames.py. Spin: 36 frames all the way round.
+  // Steps: 19 frames across +-45 degrees each, with each tag's position per frame.
+  async function renderAll() {
+    const snap = async (path, W, H) => {
+      renderer.render(scene, cam);
+      const blob = await new Promise(r => renderer.domElement.toBlob(r, 'image/webp', 0.82));
+      await fetch('/save/' + path, { method: 'POST', body: blob });
+    };
+    const size = (W, H) => { renderer.setSize(W, H, false); cam.aspect = W / H; cam.updateProjectionMatrix(); };
+    const bg = () => {
+      const px = document.createElement('canvas'); px.width = px.height = 1;
+      px.getContext('2d').drawImage(renderer.domElement, 3, 3, 1, 1, 0, 0, 1, 1);
+      const d = px.getContext('2d').getImageData(0, 0, 1, 1).data; return `rgb(${d[0]},${d[1]},${d[2]})`;
+    };
+    // Turntable
+    const SW = 1000, SH = 720, SN = 36;
+    size(SW, SH); paint(-1);
+    for (let k = 0; k < SN; k++) { aim(VIEWS.spin, k / SN * Math.PI * 2 + Math.PI / 6); await snap(`frames/pollinator/spin/${k}.webp`); }
+    await fetch('/save/frames/pollinator/spin/manifest.js', { method: 'POST',
+      body: '// made by render_frames.py from pollinator-3d.html\nwindow.SPIN = ' + JSON.stringify({ w: SW, h: SH, n: SN, bg: bg() }) + ';\n' });
+    // Steps, in the format frames-player.js reads
+    const W = 1000, H = 640, N = 19, C = (N - 1) / 2, ARC = Math.PI / 4;
+    size(W, H);
+    const out = { w: W, h: H, n: N, center: C, steps: [], trans: {} };
+    for (let s = 0; s < STEPS.length; s++) {
+      paint(s);
+      const tags = [];
+      for (let k = 0; k < N; k++) {
+        aim(VIEWS[STEPS[s].view], (k - C) / C * ARC);
+        tags.push(TAGS.map((t, i) => STEPS[s].tags.includes(i) ? proj(t.at) : 0));
+        await snap(`frames/pollinator/ports/s${s}-${k}.webp`);
+      }
+      out.steps.push({ tags });
+    }
+    out.bg = bg();
+    await fetch('/save/frames/pollinator/ports/manifest.js', { method: 'POST',
+      body: '// made by render_frames.py from pollinator-3d.html\nwindow.FRAMES = ' + JSON.stringify(out) + ';\n' });
+    await fetch('/done', { method: 'POST' });
+  }
+}
+Promise.race([document.fonts ? document.fonts.load('800 14px Figtree') : null, new Promise(r => setTimeout(r, 1200))]).catch(() => {}).then(boot);
+</script>
+</body>
+</html>

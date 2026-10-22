@@ -1,0 +1,50 @@
+CODE YOUR CONTROLLER, STEP 02/03: VOICEOVER SCRIPT
+Video file: code-canvas-pollinator.mp4 (codecontrol.html shows a placeholder until it is uploaded)
+Length: about 50 seconds. Audience: Years 5 and 6. Speak slowly, and pause where it says [pause].
+
+Before recording
+- iPad on the robot's Wi-Fi, remote open, Advanced (code) selected, code canvas open (</> Code).
+- Tap ↺ Reset canvas first, so the starting program is on screen.
+- Robot on the floor or a big table, with room to drive 30 cm forward. A ruler next to it helps.
+- Record the iPad screen and the robot together (or film the robot separately and cut between them).
+
+
+TIME     ON SCREEN                                              VOICEOVER
+
+0:00     The code canvas, the starting blocks.                  "These blocks tell the robot's motors what to do."
+
+0:04     Circle the four green "move" blocks.                   "The d-pad tells the movement motors, C and D,
+                                                                 how to move the wheels."
+
+0:09     Circle the two "rotate Motor E" blocks.                "The slider tells motor E what to do. That's the
+                                                                 motor that moves the pollination arm."
+                                                                 [pause]
+
+0:15     Zoom in on: when remote 1 up → move forward 3 cm.     "Right now, the up button moves the robot forward
+                                                                 3 centimetres."
+
+0:20     Point to the left and right blocks (1 seconds).        "The left and right buttons turn the robot left
+                                                                 or right for 1 second."
+                                                                 [pause]
+
+0:25     Tap ▶ Run. Press up on the d-pad.                      "Tap Run, then press up."
+         Cut to the robot: it rolls forward 3 cm.               "The robot moves a small step forward."
+
+0:31     Press left, then right. The robot turns each way.      "Left turns it one way... and right turns it back."
+                                                                 [pause]
+
+0:37     Tap the 3 in the up block, type 15, tap away.          "We can change how far it moves by changing these
+                                                                 numbers. Let's change 3 centimetres to 15."
+
+0:43     Press up. Cut to the robot: it drives 15 cm,           "Now when we press up... the robot moves much
+         next to the ruler.                                      further. 15 centimetres is half a ruler."
+
+0:49     Back to the code canvas.                               "Now it's your turn. Change a number, then try it!"
+
+0:52     End.
+
+
+Tips
+- If the robot drives backwards when you press up, or spins when it should go straight, the hub program's
+  motor directions need changing: see DIRECTIONS at the top of "SPIKE code/pollinator-spike.py".
+- Keep "Stop" out of the shot until the end: the next page (03/03) explains Stop and Run.

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Robot Pollinator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700;800&display=swap">
+<style>
+/* The robot pollinator, from frames pre-rendered by render_frames.py (pollinator-3d.html), so it stays light on iPads.
+   ?for=spin   the whole robot: drag to turn it all the way round, with a tally of the flowers pollinated in a minute
+   ?for=ports  what the remote controls: tap the numbers to see each port's motor */
+:root {
+  --eggshell: #F9F6E7; --onyx: #272A24; --cobalt: #4C34E5; --flame: #FF6D3A; --yellow: #FFCD1F; --green: #00BC74;
+  --muted: #5C6057; --line: #DDD8C2; --card: #FFFFFF;
+  --font: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent }
+html, body { height: 100%; margin: 0 }
+body { background: var(--eggshell); color: var(--onyx); font: 15px/1.45 var(--font); display: flex; flex-direction: column }
+#asm { position: relative; flex: 1; min-height: 260px; overflow: hidden; touch-action: pan-y; cursor: grab; user-select: none; -webkit-user-select: none }
+#asm:active { cursor: grabbing }
+#asm:focus-visible { outline: 3px solid var(--flame); outline-offset: -3px }
+.fp-view { position: absolute }
+.fp-view img { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; visibility: hidden }
+.tag-at { position: absolute; width: 0; height: 0; pointer-events: none }
+.tag { position: absolute; left: 0; top: 0; pointer-events: none; font: 800 14px/1 var(--font); padding: 7px 9px; border-radius: 8px;
+  background: var(--yellow); border: 2px solid var(--onyx); color: var(--onyx); white-space: nowrap }
+.hint { position: absolute; top: 10px; right: 12px; font-size: 12px; font-weight: 600; color: var(--muted); pointer-events: none; z-index: 2 }
+.board { position: absolute; left: 10px; top: 10px; z-index: 2; margin: 0; width: min(28%, 180px); padding: 5px 5px 4px;
+  background: var(--card); border: 2px solid var(--onyx); border-radius: 10px; pointer-events: none; text-align: center; font-size: 13px }
+.board img { display: block; width: 100%; border-radius: 6px }
+.board[hidden] { display: none }
+.bar { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; align-items: center; padding: 12px 14px;
+  border-top: 2px solid var(--line); background: var(--card) }
+.steps { display: flex; gap: 6px; flex-wrap: wrap }
+.steps button { font: 800 15px/1 var(--font); min-height: 44px; min-width: 44px; padding: 0 14px; border-radius: 999px; border: 2px solid var(--onyx);
+  background: var(--card); color: var(--onyx); cursor: pointer }
+.steps button.sel { background: var(--cobalt); border-color: var(--cobalt); color: #fff }
+.steps button:focus-visible { outline: 3px solid var(--flame); outline-offset: 2px }
+.say { font-size: 16px; min-width: 0 }
+.say b { color: var(--cobalt) }
+@media (max-width: 720px) { .bar { grid-template-columns: 1fr } }
+
+/* Spin view: the turntable fills the frame; the tally card sits in its corner */
+.spin img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none }
+.tally { position: absolute; left: 12px; bottom: 12px; z-index: 3; width: min(300px, calc(100% - 24px)); background: var(--card);
+  border: 2px solid var(--onyx); border-radius: 16px; padding: 10px 12px 12px; cursor: default; touch-action: manipulation }
+.tally-head { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.tally-head b { font-size: 15px }
+.clock { font: 800 22px/1 var(--font); font-variant-numeric: tabular-nums; color: var(--cobalt) }
+.clock.done { color: var(--flame) }
+.marks { display: flex; flex-wrap: wrap; gap: 4px 10px; min-height: 46px; align-items: center; margin: 8px 0 6px }
+.marks svg { width: 46px; height: 40px; display: block }
+.marks .empty { color: var(--muted); font-size: 13px }
+.count { font-size: 13px; color: var(--muted); margin-bottom: 8px }
+.count b { color: var(--onyx); font-size: 18px }
+.tally-btns { display: flex; gap: 8px }
+.tally-btns button { font: 800 15px/1 var(--font); min-height: 44px; border-radius: 999px; border: 2px solid var(--onyx); background: #fff; cursor: pointer; padding: 0 12px }
+.tally-btns .add { flex: 1; background: var(--green); border-color: var(--green); color: #fff }
+.tally-btns .go { background: var(--cobalt); border-color: var(--cobalt); color: #fff }
+.tally-btns button:disabled { opacity: .4; cursor: default }
+@media (min-width: 640px) {          /* room for both: the tally in a column on the left, the robot beside it */
+  .spin img { left: 300px; width: calc(100% - 300px) }
+  .tally { width: 276px; top: 50%; bottom: auto; transform: translateY(-50%) }
+}
+</style>
+</head>
+<body>
+<div id="asm" tabindex="0"><div class="hint" id="hint">Drag to turn</div></div>
+<div class="bar" id="bar" hidden>
+  <div class="steps" role="group" aria-label="Steps" id="stepBtns"></div>
+  <div class="say" id="say" aria-live="polite"></div>
+</div>
+
+<script src="frames-player.js"></script>
+<script>
+const MODE = new URLSearchParams(location.search).get('for') === 'ports' ? 'ports' : 'spin';
+const BASE = 'frames/pollinator/' + MODE + '/';
+const asm = document.getElementById('asm');
+const load = (src) => new Promise((ok, fail) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+
+// ---------- ?for=ports: what the remote controls
+const SAY = [
+  'These are the hub\'s <b>ports</b>. Each one has a letter. The remote controls the motors in ports <b>C</b>, <b>D</b> and <b>E</b>.',
+  'The <b>movement motors</b> are in ports <b>C</b> (right wheel) and <b>D</b> (left wheel). The <b>d-pad</b> on the remote drives them.',
+  'The <b>arm motor</b> is in port <b>E</b>. The <b>slider</b> on the remote moves the pollination arm.',
+  'The <b>GTAC board</b> connects the iPad to your robot. It is plugged into port <b>A</b>.',
+];
+// Tags, in the order pollinator-3d.html stored their positions
+const TAGS = ['A', 'C', 'E', 'D', 'C · right wheel', 'D · left wheel', 'E · pollination arm', 'GTAC board → A']
+  .map(html => ({ html, tf: 'translate(-50%, -50%)' }));
+
+function ports() {
+  asm.setAttribute('role', 'img');
+  asm.setAttribute('aria-label', 'The robot pollinator: the hub\'s ports, the wheel motors in C and D, the arm motor in E and the GTAC board in A.');
+  const board = document.createElement('figure'); board.className = 'board'; board.hidden = true;
+  board.innerHTML = '<img src="gtac-board.webp" alt="The GTAC board: a blue gtac case with a black cable ending in the plug for port A"><figcaption>The <b>GTAC board</b></figcaption>';
+  asm.appendChild(board);
+  const player = FramesPlayer(asm, window.FRAMES, BASE, TAGS);
+  const bar = document.getElementById('bar'), btns = document.getElementById('stepBtns'), say = document.getElementById('say');
+  bar.hidden = false;
+  const buttons = SAY.map((_, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = i + 1;
+    b.addEventListener('click', () => setStep(i)); btns.appendChild(b); return b;
+  });
+  function setStep(s) {
+    board.hidden = s !== 3;
+    buttons.forEach((b, i) => b.classList.toggle('sel', i === s));
+    say.innerHTML = '<b>' + (s + 1) + '.</b> ' + SAY[s];
+    player.setStep(s);
+  }
+  setStep(0);
+}
+
+// ---------- ?for=spin: the whole robot, all the way round, and the pollination tally
+function spin() {
+  const S = window.SPIN, reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  asm.classList.add('spin'); asm.style.background = S.bg;
+  asm.setAttribute('aria-label', 'The robot pollinator, turning. Drag to turn it.');
+  const img = document.createElement('img'); img.alt = 'The robot pollinator built from LEGO: two big wheels, the SPIKE hub on top and the pollination arm at the front';
+  asm.prepend(img);
+  const urls = [...Array(S.n).keys()].map(k => BASE + k + '.webp');
+  urls.forEach(u => { const im = new Image(); im.src = u; });          // load them all: it turns smoothly once they're in
+  let k = 0, auto = !reduce, drag = null;
+  const show = () => { img.src = urls[((k % S.n) + S.n) % S.n]; };
+  show();
+  setInterval(() => { if (auto && !document.hidden) { k++; show(); } }, 140);
+  asm.addEventListener('pointerdown', e => {
+    if (e.target.closest('.tally')) return;
+    auto = false; drag = { x: e.clientX, k }; asm.setPointerCapture(e.pointerId);
+  });
+  asm.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const nk = drag.k - Math.round((e.clientX - drag.x) / Math.max(8, asm.clientWidth / (S.n * 1.2)));
+    if (nk !== k) { k = nk; show(); }
+  });
+  ['pointerup', 'pointercancel'].forEach(n => asm.addEventListener(n, () => { drag = null; }));
+  asm.addEventListener('keydown', e => {
+    const d = { ArrowLeft: 1, ArrowRight: -1 }[e.key];
+    if (d) { e.preventDefault(); auto = false; k += d; show(); }
+  });
+  tally();
+}
+
+// The tally: tap + for each flower pollinated. Marks are drawn in fives, like on paper.
+function tally() {
+  const box = document.createElement('section'); box.className = 'tally'; box.setAttribute('aria-label', 'Pollination tally');
+  box.innerHTML = '<div class="tally-head"><b>🌼 Flowers pollinated</b><span class="clock" id="clock" aria-live="polite">1:00</span></div>' +
+    '<div class="marks" id="marks"></div><div class="count" id="count"></div>' +
+    '<div class="tally-btns"><button type="button" class="go" id="go">▶ Start</button>' +
+    '<button type="button" class="add" id="add" aria-label="Add one flower">+ 1 flower</button>' +
+    '<button type="button" id="undo" aria-label="Take one away">−</button></div>';
+  asm.appendChild(box);
+  const $ = id => box.querySelector('#' + id);
+  let n = 0, left = 60, timer = 0;
+  const five = (m) => {
+    let s = '<svg viewBox="0 0 46 40" aria-hidden="true">';
+    for (let i = 0; i < Math.min(m, 4); i++) s += `<line x1="${7 + i * 9}" y1="4" x2="${7 + i * 9}" y2="36" stroke="#272A24" stroke-width="4" stroke-linecap="round"/>`;
+    if (m === 5) s += '<line x1="2" y1="31" x2="44" y2="9" stroke="#FF6D3A" stroke-width="4" stroke-linecap="round"/>';
+    return s + '</svg>';
+  };
+  function draw() {
+    const groups = [];
+    for (let i = 0; i < n; i += 5) groups.push(five(Math.min(5, n - i)));
+    $('marks').innerHTML = groups.join('') || '<span class="empty">Tap <b>+ 1 flower</b> each time your robot pollinates a flower.</span>';
+    $('count').innerHTML = '<b>' + n + '</b> ' + (n === 1 ? 'flower' : 'flowers');
+    $('undo').disabled = !n;
+  }
+  function clock() {
+    $('clock').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    $('clock').classList.toggle('done', left === 0);
+  }
+  $('add').addEventListener('click', () => { n++; draw(); });
+  $('undo').addEventListener('click', () => { if (n) { n--; draw(); } });
+  $('go').addEventListener('click', () => {
+    if (timer) {                                  // Reset
+      clearInterval(timer); timer = 0; left = 60; n = 0; $('go').textContent = '▶ Start'; draw(); clock(); return;
+    }
+    n = 0; left = 60; draw(); clock(); $('go').textContent = '↺ Reset';
+    timer = setInterval(() => {
+      left = Math.max(0, left - 1); clock();
+      if (!left) { clearInterval(timer); timer = -1; $('count').innerHTML = 'Time! <b>' + n + '</b> ' + (n === 1 ? 'flower' : 'flowers') + ' in one minute.'; }
+    }, 1000);
+  });
+  draw(); clock();
+}
+
+load(BASE + 'manifest.js').then(() => (MODE === 'ports' ? ports() : spin()))
+  .catch(() => { asm.innerHTML = '<p style="padding:24px;color:#5C6057">The robot pictures have not been made yet: run <b>render_frames.py pollinator</b>.</p>'; });
+</script>
+</body>
+</html>
