@@ -2,19 +2,18 @@
 # runs it at power-up (the module keeps the name arm.py, so boards set up for the robot arm
 # start it unchanged).
 #
-# At power-up the board is a plain LEGO Distance Sensor that reads "idle", and its Wi-Fi hotspot
-# comes up with internet shared from the uplink network. The iPad stays on the hotspot: it can
-# browse, or open the remote to drive the pollinator and run Blockly programs.
-# How the board, hub and page talk: README.md.
+# At power-up the board is a plain LEGO Distance Sensor that reads "idle", and it turns Bluetooth
+# on under its name (e.g. ROBOT 7). The iPad stays on the school's Wi-Fi, opens the remote from the
+# website in Bluefy and connects to the board over Bluetooth (ble.py); the board passes the remote's
+# commands to the hub and the hub's news back. How the board, hub and page talk: README.md.
 #
-# This module, lump.py, web.py and the page files (www_data.py) are frozen into the firmware;
-# the board's filesystem only holds main.py and config.py.
+# This module, lump.py and ble.py are frozen into the firmware; the board's filesystem only holds
+# main.py and config.py (its name).
 
 import utime
 import machine
 import gc
 import esp32
-import repeater
 from lump import Lump, LIGHT
 
 # ---------------------------------------------------------------------------
@@ -35,14 +34,13 @@ DRIVES = "fblr"                     # drive patterns: forward, back, left, right
 FRAME_MS = 30                       # remote: each motor's state is repeated in turn this often
 HOLD_MS = 15                        # shortest hold of a command, so the hub reads it twice
 IDLE_MS = 20                        # idle reading update rate
-STATUS_MS = 1000                    # uplink status check interval (printed when it changes)
-IDLE_POLL_MS = 20                   # web server check interval while the remote page is closed
+IDLE_POLL_MS = 20                   # Bluetooth check interval while the remote is not connected
 
 
 class Arm:
     def __init__(self):
         self.sensor = None
-        self.web = None
+        self.link = None
         self.states = [0] * 5           # remote run state of motors B..F
         self.queue = []                 # command codes waiting to go to the hub
         self.rotate = 0
@@ -59,8 +57,7 @@ class Arm:
         if mode != LIGHT or len(data) < 4:
             return
         kind, a, b, c = data[0], data[1], data[2], data[3]
-        # kind 1 (Wi-Fi on/off) is ignored: the hotspot stays on, since the iPad's internet
-        # depends on it, and a hub program ending must not cut it off.
+        # kind 1 (the hub's old Wi-Fi on/off message) is ignored: there is no Wi-Fi; Bluetooth stays on
         if kind in (2, 3) and a < 5:
             angle = b * 100 + c
             (self.positions if kind == 2 else self.baselines)[a] = angle
@@ -71,18 +68,9 @@ class Arm:
             self.hub = "h %d %s %d" % (a, MOTORS[b] if b < 5 else "B", c)
             self.tell(self.hub)
 
-    def hub_status(self):
-        """For the /stats page: is the hub talking, and its battery (None if never reported)."""
-        s = self.sensor
-        battery = None
-        if self.battery:
-            pct, mv, when = self.battery
-            battery = (pct, mv, utime.ticks_diff(utime.ticks_ms(), when) // 1000)
-        return {"connected": bool(s and getattr(s, "connected", True)), "battery": battery}
-
     def tell(self, line):
-        if self.web:
-            self.web.broadcast(line)
+        if self.link:
+            self.link.broadcast(line)
 
     # ---------- messages from the page
     def page(self, p):
@@ -159,7 +147,7 @@ class Arm:
         return CMD_MM + CMD_STEP * code
 
     def tick(self):
-        remote = bool(self.web) and self.web.page_open()
+        remote = bool(self.link) and self.link.page_open()
         if remote != self.remote:
             self.remote = remote
             self.release()
@@ -206,44 +194,39 @@ def memory():
         gc.mem_free() // 1024, free // 1024, total // 1024, least // 1024)
 
 
-def main():
-    import web
-    import network
-    import ubinascii
-    # The address the uplink network sees for this board (all its iPad's traffic is
-    # NATed to it), so it is the one to authorise. Printed for tools/provision.py.
-    print("STA-MAC", ubinascii.hexlify(network.WLAN(network.STA_IF).config("mac"), ":").decode())
-    arm = Arm()
+def robot_name():
+    """The board's name, from config.py (written by tools/provision.py). Boards first set up with the
+    robot arm's Wi-Fi firmware have WIFI_NAME instead, which is the same name."""
     try:
-        arm.web = web.Web(arm.page)
-        arm.web.hub_status = arm.hub_status
-    except ValueError as e:          # not set up yet: the hub link still works
-        print(e)
+        import config
+    except ImportError:
+        return "GTAC robot"
+    return getattr(config, "ROBOT_NAME", None) or getattr(config, "WIFI_NAME", None) or "GTAC robot"
+
+
+def main():
+    import ble
+    import ubinascii
+    # The chip's MAC address, for tools/provision.py's list of boards
+    print("STA-MAC", ubinascii.hexlify(machine.unique_id(), ":").decode())
+    arm = Arm()
+    arm.link = ble.Ble(arm.page, robot_name())
     print(memory())
     if SIMULATE:
         from simhub import FakeHub   # only frozen into the test board's firmware
         arm.sensor = FakeHub(on_write=arm.hub_wrote, debug=DEBUG)
     else:
         arm.sensor = Lump(on_write=arm.hub_wrote, debug=DEBUG)
-    last_poll = last_status = utime.ticks_ms()
-    shown = None
+    last_poll = utime.ticks_ms()
     while True:
         arm.sensor.poll()
         now = utime.ticks_ms()
-        # Every loop while the remote is open; otherwise now and then, which is plenty to
-        # notice a page opening and leaves more of the network stack to the iPad's browsing.
-        if arm.web and (arm.web.page_open() or utime.ticks_diff(now, last_poll) >= IDLE_POLL_MS):
+        # Every loop while the remote is connected; otherwise now and then, to notice it connecting
+        if arm.link.page_open() or utime.ticks_diff(now, last_poll) >= IDLE_POLL_MS:
             last_poll = now
-            arm.web.poll()
-        if web.UPLINK_NAME and utime.ticks_diff(now, last_status) >= STATUS_MS:
-            last_status = now
-            up, rssi, failures, held = repeater.status()
-            if up != shown:
-                shown = up
-                print("Internet via %s: %s" % (web.UPLINK_NAME, "up, %d dBm" % rssi if up else "down"))
-                print(memory())
+            arm.link.poll()
         arm.tick()
-        if not (arm.web and arm.web.page_open()):
+        if not (arm.link and arm.link.page_open()):
             utime.sleep_ms(2)          # nothing else to do: don't spin (the muscle sensor used to pace this)
 
 

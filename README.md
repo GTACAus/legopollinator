@@ -1,14 +1,14 @@
 # legopollinator: The Pollination Problem
 
-Firmware for the GTAC **robot pollinator**'s LMS-ESP32 board, which also shares
-the internet, plus the hub program and the activity's website (`newsite/`).
-The iPad joins the board's own Wi-Fi (e.g. **ROBOT 7**) and can both browse the
-web and drive the robot, so students don't switch between the robot's Wi-Fi and
-the site's Wi-Fi.
+Firmware for the GTAC **robot pollinator**'s LMS-ESP32 board, the SPIKE hub
+program, and the activity's website (`newsite/`). The iPad stays on the
+school's Wi-Fi, opens the remote from the website in the **Bluefy** app, and
+connects to the robot over **Bluetooth**; the board passes the remote's
+commands to the SPIKE hub through port A.
 
-Made from the robot arm's firmware (legodisco): the same boards, Wi-Fi and
-provisioning, with the muscle sensor removed and a remote and code blocks for a
-driving robot:
+(Branch `main` has the Wi-Fi version, where each board runs its own hotspot
+that the iPad joins. This branch removes all of that: the board's Wi-Fi is
+never turned on.)
 
 | Port | Motor |
 |---|---|
@@ -17,34 +17,26 @@ driving robot:
 | D | left wheel (mounted mirrored) |
 | E | the pollination arm |
 
-Runs on the **LMS-ESP32 v2** (ESP32-PICO-V3-02), the boards in use, and on the
-older v1 (ESP32-WROVER): the firmware tells them apart by itself.
-
-No Wi-Fi names or passwords are in this repo or the firmware: they are
-entered when the boards are flashed (see [Flashing a classroom set](#flashing-a-classroom-set))
-and live only in each board's `config.py`.
-
-Three parts work together:
-
 | Part | Where | Runs on |
 |---|---|---|
-| Firmware: hotspot, internet sharing, the iPad page, the "distance sensor" | `app/`, `firmware/` | the LMS-ESP32 board |
+| The remote: d-pad, slider, code blocks | `newsite/roboarm_mini/remote/` | the iPad, in Bluefy (from GitHub Pages) |
+| Firmware: Bluetooth link, the "distance sensor" | `app/`, `firmware/` | the LMS-ESP32 board |
 | Hub program | `SPIKE code/pollinator-spike.py` | the SPIKE Prime hub, program slot 0 |
 | Provisioning | `tools/provision.py` | the computer that flashes the boards |
 
-This repo is also copied into the website as `newsite/roboarm_mini/lms_esp32/`.
-
 ## For students
 
-| | |
-|---|---|
-| Wi-Fi | the name on the board (e.g. **ROBOT 7**), with the hotspot password set when flashing |
-| Remote | **http://gtac.local** or **http://10.10.10.10** (or the "Robot arm" app) |
-| Internet | works as normal while on the board's Wi-Fi |
+1. Start program 0 on the hub (03/05 in the robot instructions).
+2. On the iPad, open the **Bluefy** app and go to the remote
+   (`…/newsite/roboarm_mini/remote/` on the website, or **Open the remote** on
+   robot instructions 04/05).
+3. Tap **Connect your robot**, choose the robot's name (e.g. **ROBOT 7**),
+   and tap **Pair**. The button turns green: **Connected: ROBOT 7**.
 
-Every board answers to `gtac.local` on its own Wi-Fi, so the address is the
-same for every robot. If the hotspot password differs from the one on the
-printed QR codes, reprint them.
+Safari can't use Bluetooth from a web page; Bluefy (free on the App Store)
+can. Only one iPad can connect to a robot at a time. If the link drops (out
+of range, the board restarted), the remote reconnects by itself; the motors
+stop as soon as the iPad goes.
 
 ### The page (The Pollination Problem)
 
@@ -73,7 +65,6 @@ Remote layouts and programs are kept until the iPad's tab is closed.
 | Button | Does |
 |---|---|
 | Left | scrolls the battery level across the lights (also printed in the SPIKE App console) |
-| Both, for 1 second | the board's Wi-Fi on / off message (the board ignores it: its hotspot stays on) |
 
 The hub shows **P** when the board is connected and **?** while it waits.
 
@@ -85,36 +76,27 @@ C and D; if UP spins the robot on the spot, flip just one of them. Wheel speeds
 are `DRIVE_SPEEDS` (slow, medium, fast in degrees per second); the page's
 blocks use the same numbers (`DRIVE_DPS` in the blocks) to time their moves.
 
-## How it behaves
+## How the remote, board and hub talk
 
-- **Hotspot always on.** It comes up at power-up; the hub's Wi-Fi on/off
-  message is ignored, so a SPIKE program ending can't cut the iPad's internet.
-- **Internet from the site's Wi-Fi (the "uplink").** The board joins the
-  strongest access point of the uplink network and shares it with NAT, in C
-  (module `repeater`), so forwarding never waits on the Python loop. The
-  forwarding runs on CPU core 0 and the arm's Python on core 1.
-- **While the remote is open, the uplink is left alone.** No scans or
-  reconnects, because a scan pauses the hotspot for about 1.5 s, which could
-  trip the stop-all-motors safety rule. If the uplink drops while driving,
-  the board reconnects once the page is closed.
-- **While the remote is closed,** the Python loop checks the web server
-  every 20 ms instead of continuously. The hub link keeps running, since the
-  hub needs its "distance sensor" at all times.
-- **Joining the hub never stalls the page.** With no hub answering, each try
-  takes about 6 s; it runs a step at a time, so the web server keeps working.
-- **Stuck connections are cleared.** A page download or live link that makes
-  no progress for 10 s (an iPad that slept or left) is closed, so it can't tie
-  up sockets and memory.
-- **If the uplink is down** (or none was set), the iPad is given the board as
-  its DNS server and gets the old captive pop-up, so the robot still works
-  offline. Leases last 2 minutes, so an iPad switches between captive and
-  internet within about a minute of the uplink coming or going.
-- **Only the hotspot can reach the robot.** The web server listens on
-  10.10.10.10 only, so other devices on the uplink network can't drive it.
+**Remote ↔ board (Bluetooth, `app/ble.py`).** The board advertises a GATT
+service `8f3a0001-5e0b-4c8e-9a1d-7c2b3e4f5a60` under its name (from its
+`config.py`). The page writes lines to RX (`…0002`, write without response)
+and gets lines back as notifications on TX (`…0003`):
 
-## How the board and the hub talk
+- page → board, every 0.5 s and on every change: `x=1&m=<five run states>`,
+  plus commands: `c=drive&w=f|b|l|r&g=<wheel degrees>&v=<speed 0-2>`,
+  `c=turn&k=<motor>&g=<degrees>&v=…`, `c=go&k=…&a=<angle>&d=<direction>&v=…`,
+  `c=home`, `c=stop`. Run states: 0 stop, 1–3 forward slow / medium / fast,
+  4–6 back, for motors B–F.
+- board → page: `h 1 B <fitted-motors mask>` (at most once a second, in reply),
+  `p <motor> <angle>` positions and `b <motor> <angle>` homes as they change.
 
-The board pretends to be a LEGO Distance Sensor on hub **port A**.
+The page is "connected" while it has had a line from the board in the last
+2.5 s. If the board hears nothing for 3 s, or the iPad disconnects, every
+motor stops.
+
+**Board → hub.** The board pretends to be a LEGO Distance Sensor on hub
+**port A**.
 
 - **Board → hub**: the distance reading. 50 mm is "idle" (the board is there,
   the remote is closed: after 1.5 s of it the hub stops any running motor);
@@ -127,13 +109,10 @@ The board pretends to be a LEGO Distance Sensor on hub **port A**.
   of the degrees in 5° steps; each wheel turns that many degrees. A command is
   held for two of the hub's reads; the same code twice in a row needs a
   different reading between.
-- **Hub → board**: the sensor's four lights. `1, on` Wi-Fi; `2, motor, angle÷100,
+- **Hub → board**: the sensor's four lights. `1, on` the Wi-Fi message (ignored); `2, motor, angle÷100,
   angle%100` a position; `3, …` a home position; `4, 1, 0, fitted-motors mask`
   status; `5, percent, mV÷100, mV%100` battery (8050 mV is sent as 80, 50).
 
-The page asks the board with `c=drive&w=f|b|l|r&g=<wheel degrees>&v=<speed 0-2>`,
-next to the arm's `c=turn`, `c=go`, `c=home` and `c=stop`, and `m=` with the
-five motors' run states.
 
 Use the matching hub program: the robot arm's program (`arm-spike-app3.py`)
 doesn't know the drive command and treats the idle reading as a muscle signal.
@@ -152,107 +131,72 @@ Then, with Thonny closed:
 python tools/provision.py
 ```
 
-The first time, it asks for the Wi-Fi settings:
-
-| Setting | Example |
-|---|---|
-| Hotspot name, before the number | `ROBOT` (boards become ROBOT 1, ROBOT 2, ...) |
-| Hotspot password | what students type, or what's on the QR codes |
-| Network to share internet from | the site's Wi-Fi name (empty for none) |
-| Its password | hidden as you type |
-
-and offers to keep them in `tools/site.json` (ignored by git) so later
-sessions don't ask again. Use `--ask` to change them.
-
-Then, for each board, it asks you to plug it in, and:
+The first time, it asks for the name before each board's number (e.g.
+`ROBOT`, so boards become ROBOT 1, ROBOT 2, ...) and keeps it in
+`tools/site.json` (ignored by git). Then, for each board, it asks you to plug
+it in, and:
 
 1. reads its MAC address and picks its number: the next free one, or the
    same as last time if this board has been flashed before;
 2. wipes it and flashes `firmware/dist/legopollinator.bin`;
-3. writes `config.py` (its name and the Wi-Fi settings) and `main.py`;
-4. watches it boot and checks its hotspot comes up;
+3. writes `config.py` (its name) and `main.py`;
+4. watches it boot and checks Bluetooth comes on under its name;
 5. tells you the name to put on the label, and asks for the next board.
 
-Numbers are remembered in `tools/boards.csv`. Each board takes about 30 s,
-because the whole app, page files included, is in the one firmware image.
+Numbers are remembered in `tools/boards.csv`. Each board takes about 30 s.
 
 ```bash
 python tools/provision.py --start 12      # new boards from 12
 python tools/provision.py --number 7      # one board as number 7 (a replacement)
 python tools/provision.py --port COM8     # use this port instead of waiting for a new board
-python tools/provision.py --ask           # enter different Wi-Fi settings
+python tools/provision.py --ask           # a different name prefix
 ```
-
-To move boards to another site's Wi-Fi, re-run with `--ask` and the new
-settings; each board keeps its number.
 
 ### Updating boards that are already set up
 
-`main.py` hasn't changed, so a new release is just the new
-`firmware/dist/legopollinator.bin`. Either re-run `provision.py` (wipes the board
-and writes its settings again), or flash without erasing, which keeps the
-board's name and Wi-Fi settings:
+A new release is just a new `firmware/dist/legopollinator.bin`. Flash it
+without erasing, which keeps the board's name:
 
 ```bash
 python -m esptool --port COM8 write-flash -z 0x1000 firmware/dist/legopollinator.bin
 ```
 
-Then load the matching hub program onto each hub (below).
+Boards set up with the Wi-Fi firmware keep their name too: the Bluetooth
+firmware reads `WIFI_NAME` from their `config.py` when there is no
+`ROBOT_NAME`. To go back to Wi-Fi, flash `main`'s `legopollinator.bin` the
+same way.
 
 ### The hub program
 
 Load `SPIKE code/pollinator-spike.py` onto each hub: in the SPIKE App, a new
 Python project, paste the file in, and download it to program slot **0**.
-When it starts, its console says where it reads the battery from, or that the
-hub doesn't report it.
 
 ### On Windows (PowerShell)
 
-Provisioning only needs Python and the committed `firmware/dist/legopollinator.bin`,
-not the build toolchain.
+Provisioning only needs Python and the committed firmware, not the build
+toolchain. Install Python 3 from python.org (tick **Add python.exe to
+PATH**), then:
 
-1. Install Python 3 from python.org and tick **Add python.exe to PATH**.
-2. Install the tools and run the script (`py` is Windows' Python launcher;
-   `python` also works if it's on the PATH):
-
-   ```powershell
-   py -m pip install esptool mpremote
-   py tools\provision.py
-   ```
-
-3. If a plugged-in board doesn't appear as a **COM** port in Device Manager,
-   install the driver for its USB chip (WCH CH340/CH9102 or Silicon Labs
-   CP210x; Device Manager shows which).
-4. Close Thonny first: it holds the COM port.
-
-### Getting IT to allow the boards online
-
-The uplink network may only let known devices onto the internet. As the
-boards are flashed, provisioning writes **`tools/authorization-request.txt`**:
-a ready-to-send list of the boards and their MAC addresses to give IT. Because
-each board NATs its iPad, only these board addresses ever appear on the uplink
-network, so that one list is all IT needs. Fill in the name/contact lines at
-the top before sending.
-
-A board that is on the uplink but not yet allowed joins it and gets no address
-(`/stats` shows it not connected).
-
-Rebuild the list at any time without flashing:
-
-```bash
-python tools/provision.py --authorization
+```powershell
+py -m pip install esptool mpremote
+py tools\provision.py
 ```
+
+If a plugged-in board doesn't appear as a **COM** port in Device Manager,
+install the driver for its USB chip (WCH CH340/CH9102 or Silicon Labs
+CP210x). Close Thonny first: it holds the COM port.
 
 ## Building the firmware
 
 ```bash
-firmware/build.sh
+firmware/build.sh               # -> firmware/dist/legopollinator.bin
+firmware/build.sh xiao-test     # -> firmware/dist/legopollinator-xiao-test.bin
 ```
 
-The first run (shared with legodisco, so already done on a computer that has built it) downloads MicroPython v1.29.0 and ESP-IDF v5.5.2 and installs
-the Xtensa toolchain (about 3 GB in all, into `~/esp/legodisco-deps` and
-`~/.espressif`; override the former with `LEGODISCO_DEPS`). Output:
-`firmware/dist/legopollinator.bin`.
+MicroPython v1.29.0 with its Bluetooth (NimBLE) stack, and the app frozen
+in. The first run downloads MicroPython and ESP-IDF v5.5.2 and installs the
+Xtensa toolchain (about 3 GB, into `~/esp/legodisco-deps`, shared with
+legodisco, and `~/.espressif`).
 
 ### On Windows: WSL
 
@@ -283,98 +227,66 @@ wsl --export Ubuntu C:\Users\<you>\Documents\wsl-ubuntu-backup.tar
 wsl --import Ubuntu C:\Users\<you>\wsl\Ubuntu C:\Users\<you>\Documents\wsl-ubuntu-backup.tar   # to restore
 ```
 
-### Changing the page
+## The remote (the website)
 
-The page files are kept gzipped in `app/www` (`app.js.gz`, `blockly.js.gz`
-with the blocks at its end, `index.html.gz`, `style.css.gz`). Unzip, edit,
-gzip again, then build: `tools/make_www.py` (run by `build.sh`) packs them
-into the firmware and stamps `blockly.js?v=` in `app.js`, so iPads fetch a
-changed `blockly.js` instead of a cached one.
+The remote is plain files in `newsite/roboarm_mini/remote/`, served by GitHub
+Pages over HTTPS (Web Bluetooth needs HTTPS): `index.html`, `app.js` (the
+remote, the Bluetooth link), `blockly.js` (Blockly, with the pollinator's
+blocks at the end), `style.css`. Edit them and push; nothing is built.
 
-To try the page without a board:
+To try the remote on this computer with a pretend board:
 
 ```bash
 python tools/mock_board.py        # then open http://localhost:8765
 ```
 
-It serves the page with a pretend board and hub behind it;
-`http://localhost:8765/log` shows what the page sent.
+On `localhost` the page talks to the pretend board over HTTP instead of
+Bluetooth. `http://localhost:8765/log` shows what the page sent;
+`/shot` and `/shot?code` are for screenshots (see the top of
+`tools/mock_board.py`).
 
 | Path | What |
 |---|---|
-| `app/arm.py` | the pollinator program (keeps the arm's file name, so boards' `main.py` is unchanged): hub commands, page messages, hub status for `/stats` |
-| `app/config.py` | not in the repo: written to each board by `tools/provision.py` |
-| `app/web.py` | hotspot, uplink, web server, WebSocket, `/stats`; serves page files from flash |
+| `app/arm.py` | the pollinator program (keeps the arm's file name, so boards' `main.py` is unchanged): hub commands, the remote's messages |
+| `app/ble.py` | the Bluetooth link to the remote |
 | `app/lump.py` | the Distance Sensor that the hub sees (LEGO's LUMP protocol); picks the board's LEGO port pins |
 | `app/simhub.py` | fake hub for the test board (see below) |
 | `app/main.py` | two lines on the board's filesystem that start `arm` |
-| `app/www/` | the iPad page (gzipped) |
-| `firmware/modules/repeater/` | C module: uplink, NAT, DNS hand-out, `gtac.local` responder |
-| `firmware/board/LEGODISCO/` | MicroPython board definition and speed settings |
-| `firmware/board/XIAO_S3_TEST/` | same app on a XIAO ESP32S3, hub + sensor simulated |
+| `app/config.py` | not in the repo: the board's name, written by `tools/provision.py` |
+| `firmware/board/LEGODISCO/` | MicroPython board definition: Bluetooth on, the app frozen in |
+| `firmware/board/XIAO_S3_TEST/` | same app on a XIAO ESP32S3, hub simulated |
 | `SPIKE code/pollinator-spike.py` | the hub program |
 | `tools/provision.py` | flash and name a set of boards |
-| `tools/make_www.py` | packs `app/www` into the firmware |
-| `tools/mock_board.py` | the page on your computer with a pretend board |
-| `newsite/roboarm_mini/` | the website: index, robot instructions, code your controller, the 3D pollinator |
+| `tools/mock_board.py` | the remote on your computer with a pretend board |
+| `newsite/roboarm_mini/` | the website: index, robot instructions, code your controller, the remote, the 3D pollinator |
 
-## Testing the site on a spare XIAO ESP32S3
+## Testing on a spare XIAO ESP32S3
 
-You can try the whole site — hotspot, web pages, `gtac.local`, internet
-sharing — on a XIAO ESP32S3 with no arm attached. A build of the same app for
-that chip is committed at `firmware/dist/legopollinator-xiao-test.bin`; it sets
-`SIMULATE = True`, which swaps in `app/simhub.py`: a fake LEGO hub (motors C,
-D and E, and a pretend battery). Driving on the page moves the position
-readouts; drive, turn, go-to and home move by an angle.
+`firmware/dist/legopollinator-xiao-test.bin` is the same firmware for a XIAO
+ESP32S3 with `SIMULATE = True`, which swaps in `app/simhub.py`: a fake hub
+(motors C, D and E). Connect to it from the remote like a real robot.
 
 ```bash
 python tools/provision.py --chip esp32s3 --simulate \
     --firmware firmware/dist/legopollinator-xiao-test.bin --number 99
 ```
 
-(The XIAO's firmware flashes at offset `0x0`, which `--chip esp32s3` selects.)
-Then join its hotspot and open `http://gtac.local`. Leave `--uplink` empty
-when asked to test the captive-portal path, or give it a network to test
-internet sharing.
-
-What this covers: the networking, the web UI and the command protocol between
-page and board. What it can't cover: the real hub's UART timing and the real
-board's exact Wi-Fi performance. The committed
-test image can lag behind; rebuild it with `firmware/build.sh xiao-test`.
-
-## Diagnostics: /stats
-
-On the hotspot, **http://gtac.local/stats** (or `http://10.10.10.10/stats`)
-shows the board's diagnostics, refreshed every 3 s:
-
-- the uplink network, signal, radio, the board's address on it, throughput;
-- **Hub link** (connected or not) and **Hub battery** (percent, volts, how long
-  ago; "charge soon" under 20 %);
-- the hotspot, its clients, chip temperature, uptime, and free RAM now and
-  lowest;
-- a **Scan for Wi-Fi** button (pauses the internet for a moment).
-
-`gtac.local` resolves on iPads and Macs; on Android, which doesn't resolve
-`.local`, use `http://10.10.10.10/stats`. The uplink network can only be
-changed by re-provisioning (`provision.py --ask`).
-
-### If a robot stops responding
-
-Open `/stats` before resetting anything:
-
-- **Hub link not connected**: check the cable in port A, and that the hub is
-  on and running program 0.
-- **Hub battery low**: charge the hub; motors weaken below about 7 V.
-- **Lowest free RAM** under about 20 KB: the board is short of memory.
+## If a robot doesn't connect
 
 Over USB (Thonny or a serial monitor), a healthy start prints:
 
 ```
-Wi-Fi on: ROBOT 7 -> http://10.10.10.10 or http://gtac.local, internet via <uplink>
+STA-MAC 14:2b:2f:b3:55:10
+Bluetooth on: ROBOT 7
+Python heap free 123 KB; system RAM free 79 of 249 KB (lowest 79 KB)
 Sensor pins: rx=8, tx=7        (18/19 on a v1 board)
 Hub connected                   (a "did not answer" or two first is normal)
-Internet via <uplink>: up, -NN dBm
 ```
+
+- Not in Bluefy's list: is another iPad connected to it? Is the board on
+  (the hub powers it through port A, so the hub must be on)?
+- Connected but the motors don't move: check the cable in port A, and that
+  the hub is running program 0 (it shows **P**).
 
 ## Design notes
 
@@ -384,52 +296,11 @@ different pins from the v1's WROVER, which frees GPIO 7/8 for the LEGO port
 Flash runs in dual (DIO) mode: in quad mode one of the v2's flash data lines
 is GPIO 18, and setting that pin up resets the board in a loop.
 
-**No PSRAM.** The boards' PSRAM (8 MB on the v1's WROVER, 2 MB on the v2) is
-deliberately unused:
-
-- On the original ESP32, PSRAM needs a compiler workaround for a chip bug that
-  adds instructions throughout the code (slower everywhere) and makes the
-  firmware too big for IRAM, so MicroPython's PSRAM build turns off the Wi-Fi
-  fast paths and compiles for size.
-- MicroPython would put the whole Python heap in PSRAM, which is reached
-  through the same small cache as the program. The muscle-sensor maths
-  allocates a heap object for every float, so the arm loop and garbage
-  collection slow down.
-- What PSRAM buys is memory headroom, and dropping Bluetooth plus freezing
-  the app into flash leaves enough internal RAM for Python, the Wi-Fi buffers
-  and the NAT table.
-
-The boot log prints free memory (`Python heap free ... system RAM free ...
-(lowest ...)`). If the lowest system RAM falls under about 20 KB while an
-iPad is browsing, there is a fallback build that uses PSRAM without the
-workaround (rev 3 chips only). It gives up the Wi-Fi receive fast path to fit,
-so it is slower on the network side, and it hasn't been tried on the v2:
-
-```bash
-firmware/build.sh PSRAM     # -> firmware/dist/legopollinator-psram.bin
-python tools/provision.py --firmware firmware/dist/legopollinator-psram.bin
-```
-
-**Speed settings** (`firmware/board/LEGODISCO/sdkconfig.board` and
-`firmware/board/sdkconfig.fast`):
-
-- CPU at 240 MHz (MicroPython's default is 160 MHz).
-- Flash at 80 MHz, since Python runs from flash.
-- Wi-Fi and lwIP forwarding paths in IRAM.
-- Bigger Wi-Fi aggregation windows, more Wi-Fi buffers and a 32 KB TCP window
-  for faster browsing, kept within a safe RAM margin.
-- 1 ms scheduler tick.
-- Wi-Fi power saving off; 40 MHz channels where the router allows (20 MHz
-  otherwise).
-- IPv4 only.
-
-**Smaller and faster to boot:** Bluetooth is removed, MicroPython's own mDNS
-is replaced by a tiny responder that answers IPv6 lookups with "none" (which
-avoids a 2–5 s stall on the iPad's first lookup), and the app is frozen into
-flash.
+**No PSRAM, no Wi-Fi.** The Wi-Fi radio is never started, so its buffers are
+set to the minimum and their RAM goes to Python and Bluetooth; PSRAM isn't
+needed. CPU at 240 MHz, flash at 80 MHz, 1 ms scheduler tick.
 
 ## Credits
 
 `lump.py`'s connect sequence follows `lpf2.py` from Anton Vanhoucke's
-PUPRemote project (GPL). The `gtac.local` responder and repeater logic come
-from the tinywifi XIAO repeater.
+PUPRemote project (GPL).

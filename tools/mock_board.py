@@ -2,11 +2,10 @@
 
     python tools/mock_board.py            then open http://localhost:8765
 
-Serves app/www the way the board does (gzipped files, the same addresses) and
-answers the page's messages (/s?...) like a board with a hub attached: motors
-C, D (wheels) and E (arm) fitted, positions that follow the remote, drive and
-turn commands. There is
-no WebSocket, so the page uses its fallback and shows "Connected (slow)".
+Serves the website's remote (newsite/roboarm_mini/remote) and answers its
+messages like a board with a hub attached: motors C, D (wheels) and E (arm)
+fitted, positions that follow the remote, drive and turn commands. On
+localhost the page talks to it over HTTP (/s?...) instead of Bluetooth.
 /log shows the last messages the page sent, to check what it asks the board.
 /shot (Basic) and /shot?code (the code canvas open) are for screenshots:
     chrome --headless=new --window-size=1349,848 --virtual-time-budget=8000 --screenshot=code.png http://localhost:8765/shot?code
@@ -16,10 +15,10 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WWW = os.path.join(ROOT, "app", "www")
+WWW = os.path.join(ROOT, "newsite", "roboarm_mini", "remote")
 PORT = 8765
-FILES = {"/": ("index.html.gz", "text/html"), "/app.js": ("app.js.gz", "application/javascript"),
-         "/style.css": ("style.css.gz", "text/css"), "/blockly.js": ("blockly.js.gz", "application/javascript"),
+FILES = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "application/javascript"),
+         "/style.css": ("style.css", "text/css"), "/blockly.js": ("blockly.js", "application/javascript"),
          "/figtree.woff2": ("figtree.woff2", "font/woff2"), "/logo.png": ("logo.png", "image/png")}
 log = []
 pos = [0, 90, 180, 270, 45]
@@ -62,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/log":
             return self.reply("\n".join(log).encode(), "text/plain")
         if path.startswith("/media/") and path.endswith(".svg"):
-            name, kind = "media/" + path[7:] + ".gz", "image/svg+xml"
+            name, kind = "media/" + path[7:], "image/svg+xml"
         elif path in FILES:
             name, kind = FILES[path]
         else:
@@ -70,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         with open(os.path.join(WWW, name), "rb") as f:
-            self.reply(f.read(), kind, gz=name.endswith(".gz"))
+            self.reply(f.read(), kind)
 
     def reply(self, body, kind, gz=False):
         self.send_response(200)

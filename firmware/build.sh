@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Build the LMS-ESP32 firmware: MicroPython + the repeater C module + the frozen pollinator app.
+# Build the LMS-ESP32 firmware: MicroPython with Bluetooth + the frozen pollinator app.
 #
 #   firmware/build.sh            -> firmware/dist/legopollinator.bin         (the one to use)
-#   firmware/build.sh PSRAM      -> firmware/dist/legopollinator-psram.bin   (fallback, see README)
 #   firmware/build.sh xiao-test  -> firmware/dist/legopollinator-xiao-test.bin (XIAO ESP32S3 test board)
 #
 # First run downloads MicroPython and ESP-IDF and installs the Xtensa toolchain
@@ -45,7 +44,6 @@ set +u   # export.sh reads unset variables
 source "$DEPS/esp-idf/export.sh" > /dev/null
 set -u
 
-python3 "$ROOT/tools/make_www.py"
 PORT="$DEPS/micropython/ports/esp32"
 make -C "$PORT" submodules BOARD_DIR="$BOARD_DIR" > /dev/null
 make -C "$DEPS/micropython/mpy-cross" > /dev/null
@@ -56,7 +54,7 @@ BUILD="$PORT/build-$BOARD${VARIANT:+-$VARIANT}"
 # edits to the board's sdkconfig files.
 rm -f "$BUILD/sdkconfig"
 make -C "$PORT" BOARD_DIR="$BOARD_DIR" ${VARIANT:+BOARD_VARIANT=$VARIANT} \
-    USER_C_MODULES="$ROOT/firmware/modules/micropython.cmake" \
+\
     -j"$(sysctl -n hw.ncpu 2> /dev/null || nproc)"
 
 cp "$BUILD/firmware.bin" "$OUT"
