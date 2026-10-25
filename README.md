@@ -85,6 +85,23 @@ C and D; if UP spins the robot on the spot, flip just one of them. Wheel speeds
 are `DRIVE_SPEEDS` (slow, medium, fast in degrees per second); the page's
 blocks use the same numbers (`DRIVE_DPS` in the blocks) to time their moves.
 
+## Trying the Bluetooth remote
+
+A second firmware image, `firmware/dist/legopollinator-ble.bin`, swaps the
+hotspot for Bluetooth: the iPad stays on the school's Wi-Fi, opens the remote
+from the website in the **Bluefy** app, and connects to the robot over
+Bluetooth. The hub program is the same.
+
+1. Flash a board with it (keeps the board's name, e.g. ROBOT 5):
+   `python -m esptool --port COM8 write-flash -z 0x1000 firmware/dist/legopollinator-ble.bin`
+2. On the iPad, open **https://gtacaus.github.io/legopollinator/newsite/roboarm_mini/remote/**
+   in Bluefy, tap **Connect your robot** and choose the robot.
+
+To go back to the hotspot, flash `firmware/dist/legopollinator.bin` the same
+way. The remote's files are in `newsite/roboarm_mini/remote/` (a copy of the
+board's page with a Bluetooth link, `app/ble.py` on the board). Branch
+`bluetooth` has the Bluetooth-only version, with all the Wi-Fi code removed.
+
 ## How it behaves
 
 - **Hotspot always on.** It comes up at power-up; the hub's Wi-Fi on/off

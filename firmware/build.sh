@@ -4,6 +4,7 @@
 #   firmware/build.sh            -> firmware/dist/legopollinator.bin         (the one to use)
 #   firmware/build.sh PSRAM      -> firmware/dist/legopollinator-psram.bin   (fallback, see README)
 #   firmware/build.sh xiao-test  -> firmware/dist/legopollinator-xiao-test.bin (XIAO ESP32S3 test board)
+#   firmware/build.sh BLE        -> firmware/dist/legopollinator-ble.bin       (Bluetooth remote, no hotspot)
 #
 # First run downloads MicroPython and ESP-IDF and installs the Xtensa toolchain
 # (~3 GB, into $LEGODISCO_DEPS (default ~/esp/legodisco-deps, shared with legodisco) and ~/.espressif).

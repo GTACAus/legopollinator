@@ -206,19 +206,40 @@ def memory():
         gc.mem_free() // 1024, free // 1024, total // 1024, least // 1024)
 
 
+def bluetooth_build():
+    """True in the Bluetooth firmware (firmware/build.sh BLE -> legopollinator-ble.bin)."""
+    try:
+        import bluetooth  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def main():
-    import web
     import network
     import ubinascii
     # The address the uplink network sees for this board (all its iPad's traffic is
     # NATed to it), so it is the one to authorise. Printed for tools/provision.py.
     print("STA-MAC", ubinascii.hexlify(network.WLAN(network.STA_IF).config("mac"), ":").decode())
     arm = Arm()
-    try:
-        arm.web = web.Web(arm.page)
-        arm.web.hub_status = arm.hub_status
-    except ValueError as e:          # not set up yet: the hub link still works
-        print(e)
+    web = None
+    if bluetooth_build():
+        # No hotspot: the remote comes from the website (newsite/roboarm_mini/remote) and connects
+        # over Bluetooth, under the board's hotspot name (config.py's WIFI_NAME, e.g. ROBOT 7)
+        import ble
+        try:
+            import config
+            name = getattr(config, "ROBOT_NAME", None) or getattr(config, "WIFI_NAME", None) or "GTAC robot"
+        except ImportError:
+            name = "GTAC robot"
+        arm.web = ble.Ble(arm.page, name)
+    else:
+        import web
+        try:
+            arm.web = web.Web(arm.page)
+            arm.web.hub_status = arm.hub_status
+        except ValueError as e:          # not set up yet: the hub link still works
+            print(e)
     print(memory())
     if SIMULATE:
         from simhub import FakeHub   # only frozen into the test board's firmware
@@ -235,7 +256,7 @@ def main():
         if arm.web and (arm.web.page_open() or utime.ticks_diff(now, last_poll) >= IDLE_POLL_MS):
             last_poll = now
             arm.web.poll()
-        if web.UPLINK_NAME and utime.ticks_diff(now, last_status) >= STATUS_MS:
+        if web and web.UPLINK_NAME and utime.ticks_diff(now, last_status) >= STATUS_MS:
             last_status = now
             up, rssi, failures, held = repeater.status()
             if up != shown:
