@@ -42,9 +42,14 @@ const Ble = {
 dev: null, rx: null, busy: false, queue: [], state: null, partial: '', name: '', wanted: false,
 supported() { return !!(navigator.bluetooth && navigator.bluetooth.requestDevice); },
 async choose() {                   // from a tap: the browser's list of robots
-if (!this.supported()) { toast('Open this page in the Bluefy app to connect over Bluetooth'); return; }
+if (!this.supported()) { toast('This browser has no Bluetooth: open this page in the Bluefy app', 6000); return; }
 let dev;
-try { dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE] }] }); } catch (_) { return; }
+try {
+dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE] }], optionalServices: [BLE_SERVICE] });
+} catch (e) {                      // closing the list without choosing is fine; anything else, say what went wrong
+if (!(e && e.name === 'NotFoundError' && /cancel/i.test(e.message || ''))) toast('Bluetooth: ' + ((e && (e.message || e.name)) || e), 8000);
+return;
+}
 if (this.dev && this.dev !== dev) this.forget();
 this.dev = dev; this.name = dev.name || 'robot'; this.wanted = true;
 dev.addEventListener('gattserverdisconnected', () => this.lost(dev));
@@ -61,7 +66,11 @@ if (dev !== this.dev) return;
 this.rx = rx; this.partial = ''; this.busy = false; this.queue = [];
 Link.open = true; Link.send(); linkState();
 toast('Connected to ' + this.name);
-} catch (_) { if (dev === this.dev && this.wanted) setTimeout(() => this.open(dev), 1500); }
+} catch (e) {
+if (dev !== this.dev || !this.wanted) return;
+toast('Bluetooth: ' + ((e && (e.message || e.name)) || e) + ' (trying again)', 4000);
+setTimeout(() => this.open(dev), 1500);
+}
 },
 lost(dev) {                        // out of range or the board restarted: keep trying until another is chosen
 if (dev !== this.dev) return;
@@ -168,9 +177,9 @@ const k = MOTORS.indexOf(a.m); if (k >= 0) lv[k] += v;
 return lv.map((l) => { l = Math.max(-3, Math.min(3, l)); return l >= 0 ? l : 3 - l; }).join('');
 }
 let toastTimer = 0;
-function toast(text) {
+function toast(text, ms) {
 const s = $('status'); s.textContent = text; s.classList.add('show');
-clearTimeout(toastTimer); toastTimer = setTimeout(() => s.classList.remove('show'), 2200);
+clearTimeout(toastTimer); toastTimer = setTimeout(() => s.classList.remove('show'), ms || 2200);
 }
 /* ================= the remote's controls ================= */
 function zone(v, sp) {                  // how far a slider or stick is pushed -> speed level
