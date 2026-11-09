@@ -224,8 +224,9 @@ try { node.setPointerCapture(e.pointerId); } catch (_) {}
 onDown(e);
 });
 node.addEventListener('pointermove', (e) => { if (e.pointerId === id) onMove(e); });
-['pointerup', 'pointercancel', 'lostpointercapture'].forEach((n) =>
-node.addEventListener(n, (e) => { if (e.pointerId === id) { id = null; onUp(e); } }));
+node.addEventListener('pointerup', (e) => { if (e.pointerId === id) { id = null; onUp(e); } });
+node.addEventListener('pointercancel', (e) => { /* ignore minor cancellations while holding */ });
+node.addEventListener('lostpointercapture', (e) => { if (id !== null) { id = null; onUp(e); } });
 }
 function buildDpad(w) {
 const box = el('div', 'dpad');
