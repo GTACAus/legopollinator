@@ -166,7 +166,16 @@ const o = S.outs[w.n] || [];
 w.ax.forEach((a, i) => {
 const v = (a.rev ? -1 : 1) * (o[i] || 0);
 if (a.m === DRIVE) {                 // the wheels: up / down both, left / right just one (a pivot turn)
-if (AXES[w.t][i] !== 'Left / right') { lv[1] += v; lv[2] -= v; }
+if (w.t === 'joy') {
+  if (i === 0) {
+    const throttle = (w.ax[0].rev ? -1 : 1) * (o[0] || 0);
+    const steering = (w.ax[1].rev ? -1 : 1) * (o[1] || 0);
+    lv[1] += (throttle + steering); // Right motor (C)
+    lv[2] += (throttle - steering); // Left motor (D)
+  }
+  return;
+}
+if (AXES[w.t][i] !== 'Left / right') { lv[1] += v; lv[2] += v; }
 else if (v < 0) lv[1] -= v;          // left: motor C drives forward
 else lv[2] += v;                     // right: motor D drives forward
 return;
